@@ -1,0 +1,8 @@
+$ver_bump = "1.14.0.post4"
+
+git add -A
+git commit -m "Release $ver_bump"
+git push
+
+git tag "v$ver_bump"
+git push origin "v$ver_bump"
