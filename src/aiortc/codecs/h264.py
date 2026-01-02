@@ -1,3 +1,5 @@
+### modified h264 for HW encoding in aiortc
+
 import fractions
 import logging
 import math
@@ -17,11 +19,15 @@ from .base import Decoder, Encoder
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BITRATE = 1000000  # 1 Mbps
-MIN_BITRATE = 500000  # 500 kbps
-MAX_BITRATE = 3000000  # 3 Mbps
+# CODEC_NAME = "libx264"
+CODEC_NAME = "h264_nvenc"
+
+DEFAULT_BITRATE = 5_000_000
+MIN_BITRATE = 3_000_000
+MAX_BITRATE = DEFAULT_BITRATE * 2
 
 MAX_FRAME_RATE = 30
+I_MAX_FRAME_RATE = int(round(MAX_FRAME_RATE))
 PACKET_MAX = 1300
 
 NAL_TYPE_FU_A = 28
@@ -245,19 +251,17 @@ class H264Encoder(Encoder):
 
         return packetized_packages
 
-    def _encode_frame(
-        self, frame: av.VideoFrame, force_keyframe: bool
-    ) -> Iterator[bytes]:
-        if self.codec and (
-            frame.width != self.codec.width
-            or frame.height != self.codec.height
-            # we only adjust bitrate if it changes by over 10%
-            or abs(self.target_bitrate - self.codec.bit_rate) / self.codec.bit_rate
-            > 0.1
-        ):
-            self.buffer_data = b""
-            self.buffer_pts = None
-            self.codec = None
+    def _encode_frame(self, frame: av.VideoFrame, force_keyframe: bool) -> Iterator[bytes]:
+        # if self.codec and (
+        #     frame.width != self.codec.width
+        #     or frame.height != self.codec.height
+        #     # we only adjust bitrate if it changes by over 10%
+        #     or abs(self.target_bitrate - self.codec.bit_rate) / self.codec.bit_rate
+        #     > 0.1
+        # ):
+        #     self.buffer_data = b""
+        #     self.buffer_pts = None
+        #     self.codec = None
 
         if force_keyframe:
             # force a complete image
@@ -267,18 +271,66 @@ class H264Encoder(Encoder):
             frame.pict_type = av.video.frame.PictureType.NONE
 
         if self.codec is None:
-            self.codec = av.CodecContext.create("libx264", "w")
+            if CODEC_NAME in av.codecs_available:
+                codec_name = CODEC_NAME
+            else:
+                codec_name = "libx264"
+
+            print("[aiortc] codec used:", codec_name)
+            
+            self.codec = av.CodecContext.create(codec_name, "w")
             self.codec.width = frame.width
             self.codec.height = frame.height
             self.codec.bit_rate = self.target_bitrate
             self.codec.pix_fmt = "yuv420p"
             self.codec.framerate = fractions.Fraction(MAX_FRAME_RATE, 1)
             self.codec.time_base = fractions.Fraction(1, MAX_FRAME_RATE)
-            self.codec.options = {
-                "level": "31",
-                "tune": "zerolatency",
-            }
-            self.codec.profile = "Baseline"
+
+            if codec_name == "h264_nvenc":
+                self.codec.options = {
+                    "level": "50",
+                    "preset": "p3",
+                    "profile": "high",
+                    "rc": "cbr",
+                    "bitrate": str(self.target_bitrate),
+                    "maxrate": str(self.target_bitrate),
+                    "bufsize": str(self.target_bitrate * 0.5),
+                    "g": str(I_MAX_FRAME_RATE),
+                    # "delay": "0",
+                    "bf": "0",
+                    "b_ref_mode": "0",  
+                    # "refs": "1",
+                    "rc-lookahead": "0", #str(I_MAX_FRAME_RATE), #
+                    "multipass" : "0",
+                    "nonref_p": "0",
+                    # "zerolatency": "1",
+                    "aq": "0",
+                    "spatial-aq": "0",
+                    "temporal-aq": "0",
+                    }
+
+            else:
+                self.codec.options = {
+                    "level": "50",
+                    "preset": "faster",
+                    "profile": "high",
+                    "maxrate": str(self.target_bitrate),
+                    "bufsize": str(self.target_bitrate * 0.5),
+                    "g": str(I_MAX_FRAME_RATE),
+                    #"keyint_min": str(I_MAX_FRAME_RATE),
+                    "sc_threshold": "0",
+                    "bf": "0",
+                    "threads": "8",
+                    "slices": "1",
+                    # "tune": "zerolatency",
+                    "x264-params": (
+                        "nal-hrd=cbr:"
+                        f"rc-lookahead=0:"
+                        "sync-lookahead=0:"
+                        "mbtree=1:"
+                        "intra-refresh=1:"
+                        "repeat-headers=1:"
+                        "weightp=0" ),}
 
         data_to_send = b""
         for package in self.codec.encode(frame):
