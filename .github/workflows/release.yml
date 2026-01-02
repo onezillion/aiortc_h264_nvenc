@@ -20,8 +20,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: python -m pip install -U pip build
+      - name: Install build + test deps
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e .[dev] pytest build
 
-      - run: python -m build
+      - name: Run tests (non-blocking)
+        run: pytest -q
+        continue-on-error: true
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
