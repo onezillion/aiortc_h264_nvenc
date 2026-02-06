@@ -86,11 +86,9 @@ some of its features:
 Installing
 ----------
 
-The easiest way to install ``aiortc`` is to run:
-
 .. code:: bash
 
-    pip install aiortc
+    pip install aiortc-h264-nvenc
 
 License
 -------
