@@ -12,6 +12,7 @@ import av
 from av.frame import Frame
 from av.packet import Packet
 from av.video.codeccontext import VideoCodecContext
+from av.codec.context import ThreadType, Flags, Flags2
 
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
@@ -113,6 +114,11 @@ class H264PayloadDescriptor:
 class H264Decoder(Decoder):
     def __init__(self) -> None:
         self.codec = av.CodecContext.create("h264", "r")
+        self.codec.thread_count = 0
+        self.codec.thread_type = ThreadType.SLICE
+        self.codec.flags |= Flags.low_delay
+        self.codec.flags2 |= Flags2.fast
+        self.codec.skip_frame = "NONREF"
 
     def decode(self, encoded_frame: JitterFrame) -> list[Frame]:
         try:
