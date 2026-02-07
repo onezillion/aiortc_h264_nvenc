@@ -13,6 +13,7 @@ from av.frame import Frame
 from av.packet import Packet
 from av.video.codeccontext import VideoCodecContext
 from av.codec.context import ThreadType, Flags, Flags2
+from av.codec.hwaccel import HWAccel
 
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
@@ -113,12 +114,38 @@ class H264PayloadDescriptor:
 
 class H264Decoder(Decoder):
     def __init__(self) -> None:
-        self.codec = av.CodecContext.create("h264", "r")
+
+        # self.hwaccel = HWAccel("cuda", allow_software_fallback=True)
+        # self.codec = av.CodecContext.create("h264", "r", hwaccel=self.hwaccel)
+
+        self.codec = None
+        self.hwaccel = None
+        for name in ("cuda", "qsv", None):
+            try:
+                if name is None:
+                    self.hwaccel = None
+                    self.codec = av.CodecContext.create("h264", "r")
+                    print("[H264Decoder] using software decode (h264)")
+                else:
+                    self.hwaccel = HWAccel(name, allow_software_fallback=False)
+                    self.codec = av.CodecContext.create("h264", "r", hwaccel=self.hwaccel)
+                    print(f"[H264Decoder] using hwaccel={name}")
+                break
+            except Exception as e:
+                print(f"[H264Decoder] hwaccel={name} init failed: {e}")
+                self.codec = None
+                self.hwaccel = None
+
+        if self.codec is None:
+            raise RuntimeError("Failed to initialize any H.264 decoder (cuda/qsv/software)")
+    
         self.codec.thread_count = 0
         self.codec.thread_type = ThreadType.SLICE
         self.codec.flags |= Flags.low_delay
         self.codec.flags2 |= Flags2.fast
         self.codec.skip_frame = "NONREF"
+        if hasattr(self.codec, "is_hwaccel"):
+            print("is_hwaccel:", self.codec.is_hwaccel)
 
     def decode(self, encoded_frame: JitterFrame) -> list[Frame]:
         try:
